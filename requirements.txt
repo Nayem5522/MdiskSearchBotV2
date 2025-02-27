@@ -9,4 +9,4 @@ tmdbv3api
 telethon
 telegraph[aio]
 markdown
-gunicorn
+gunicorn==20.1.0
