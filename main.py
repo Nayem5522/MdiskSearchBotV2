@@ -1,16 +1,14 @@
-from flask import Flask
 import threading
-from os import link
-from telethon import Button
-from configs import Config
-from pyrogram import Client
 import asyncio
-from telethon import TelegramClient
+import urllib.parse
+import re
+from flask import Flask
+from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
-from telethon import events
 from telethon.errors import UserNotParticipantError
 from telethon.tl.functions.channels import GetParticipantRequest
-import re
+from pyrogram import Client
+from configs import Config
 
 # Flask Server Setup for Health Check
 app = Flask(__name__)
@@ -20,170 +18,108 @@ def home():
     return "Bot is Running Successfully!"
 
 def run_web():
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080, threaded=True)
 
 # Flask Server Run in Background
-threading.Thread(target=run_web).start()
+threading.Thread(target=run_web, daemon=True).start()
 
+# Telethon Clients
 tbot = TelegramClient('mdisktelethonbot', Config.API_ID, Config.API_HASH).start(bot_token=Config.BOT_TOKEN)
 client = TelegramClient(StringSession(Config.USER_SESSION_STRING), Config.API_ID, Config.API_HASH)
 
+# Pyrogram Client with Plugins Support
+Bot = Client(
+    "PrimeBotz",
+    api_id=Config.API_ID,
+    api_hash=Config.API_HASH,
+    bot_token=Config.BOT_TOKEN,
+    plugins=dict(root="plugins")
+)
 
-async def get_user_join(id):
+async def get_user_join(user_id):
     if Config.FORCE_SUB == "False":
         return True
-
-    ok = True
     try:
-        await tbot(GetParticipantRequest(channel=int(Config.UPDATES_CHANNEL), participant=id))
-        ok = True
+        await tbot(GetParticipantRequest(channel=int(Config.UPDATES_CHANNEL), participant=user_id))
+        return True
     except UserNotParticipantError:
-        ok = False
-    return ok
-
+        return False
 
 @tbot.on(events.NewMessage(incoming=True))
 async def message_handler(event):
     try:
-        if event.message.post:
+        if event.message.post or event.text.startswith("/"):
             return
 
-        # if event.is_channel:return
-        if event.text.startswith("/"):return
+        print(f"\nMessage Received: {event.text}\n")
 
-        print("\n")
-        print("Message Received: " + event.text)
-
-        # Force Subscription
-        if  not await get_user_join(event.sender_id):
-            haha = await event.reply(f'''**Hey! {event.sender.first_name} 😃**
-
-**You Have To Join Our Update Channel To Use Me ✅**
-
-**Click Below Button To Join Now.👇🏻**''', buttons=Button.url('🍿Updates Channel🍿', f'https://t.me/{Config.UPDATES_CHANNEL_USERNAME}'))
+        # Force Subscription Check
+        if not await get_user_join(event.sender_id):
+            haha = await event.reply(
+                f"**Hey! {event.sender.first_name if event.sender else 'User'} 😃**\n\n"
+                "**You Have To Join Our Update Channel To Use Me ✅**\n\n"
+                "**Click Below Button To Join Now.👇🏻**",
+                buttons=Button.url('🍿Updates Channel🍿', f'https://t.me/{Config.UPDATES_CHANNEL_USERNAME}')
+            )
             await asyncio.sleep(Config.AUTO_DELETE_TIME)
             return await haha.delete()
 
         args = event.text
-        args = await validate_q(args)
-
-        print("Search Query: {args}".format(args=args))
-        print("\n")
-
         if not args:
             return
 
-        txt = await event.reply('**Printing Links For "{}" 🔍**'.format(event.text))
+        txt = await event.reply(f'**Searching for "{args}" 🔍**')
 
+        search_results = []
+        CHANNEL_ID = Config.CHANNEL_ID
 
+        async for msg in client.iter_messages(CHANNEL_ID, limit=5, search=args):
+            search_results.append(msg)
 
-        search = []
-        if event.is_group or event.is_channel:
-            group_info = await db.get_group(str(event.chat_id).replace("-100", ""))
-
-            if group_info["has_access"] and group_info["db_channel"] and await db.is_group_verified(str(event.chat_id).replace("-100", "")):
-                CHANNEL_ID = group_info["db_channel"]
-            else:
-                CHANNEL_ID = Config.CHANNEL_ID
-        else:
-            CHANNEL_ID = Config.CHANNEL_ID
-
-
-        async for i in AsyncIter(re.sub("__|\*", "", args).split()):
-            if len(i) > 2:
-               
-                search_msg = client.iter_messages(CHANNEL_ID, limit=5, search=i)
-                search.append(search_msg)
-
-        username = Config.UPDATES_CHANNEL_USERNAME
-        answer = f'**Join** [@{username}](https://telegram.me/{username}) \n\n'
-
-        c = 0
-
-        async for msg_list in AsyncIter(search):
-            async for msg in msg_list:
-                c += 1
-                f_text = re.sub("__|\*", "", msg.text)
-
-                f_text = await link_to_hyperlink(f_text)
-                answer += f'\n\n\n✅ PAGE {c}:\n\n━━━━━━━━━\n\n' + '' + f_text.split("\n", 1)[0] + '' + '\n\n' + '' + f_text.split("\n", 2)[
-                    -1] + "\n\n"
-                
-            # break
-        finalsearch = []
-        async for msg in AsyncIter(search):
-            finalsearch.append(msg)
-
-        if c <= 0:
-            answer = f'''** Sorry {event.sender.first_name} No Results Found For {event.text}**
+        if not search_results:
+            answer = f'''** Sorry {event.sender.first_name if event.sender else 'User'} No Results Found For {event.text}**
 
 **Please check the spelling on** [Google](http://www.google.com/search?q={event.text.replace(' ', '%20')}%20Movie) 🔍
 **Click On The Help To Know How To Watch**
     '''
-
-            newbutton = [Button.url('Help🙋',
-                                    f'https://t.me/postsearchbot?start=Watch')]
+            newbutton = [Button.url('Help🙋', f'https://t.me/postsearchbot?start=Watch')]
 
             await txt.delete()
             result = await event.reply(answer, buttons=newbutton, link_preview=False)
             await asyncio.sleep(Config.AUTO_DELETE_TIME)
-            await event.delete()
             return await result.delete()
-        else:
-            pass
+
+        answer = f"**Search Results for '{args}':**\n\n"
+        for index, msg in enumerate(search_results, start=1):
+            answer += f"✅ **Result {index}:** {msg.text.splitlines()[0]}\n\n"
 
         answer += f"\n\n**Uploaded By @{Config.UPDATES_CHANNEL_USERNAME}**"
-        answer = await replace_username(answer)
-        html_content = await markdown_to_html(answer)
-        html_content = await make_bold(html_content)
         
-        tgraph_result = await telegraph_handler(
-            html=html_content,
-            title=event.text,
-            author=Config.BOT_USERNAME
-        )
-        message = f'**Click Here 👇 For "{event.text}"**\n\n[🍿🎬 {str(event.text).upper()}\n🍿🎬 {str("Click me for results").upper()}]({tgraph_result})'
-
-        newbutton = [Button.url('How To Watch ❓',
-                                    f'https://t.me/postsearchbot?start=Watch')]
+        newbutton = [Button.url('How To Watch ❓', f'https://t.me/postsearchbot?start=Watch')]
 
         await txt.delete()
-        await asyncio.sleep(0.5)
-        result = await event.reply(message, buttons=newbutton, link_preview=False)
+        result = await event.reply(answer, buttons=newbutton, link_preview=False)
         await asyncio.sleep(Config.AUTO_DELETE_TIME)
-        # await event.delete()
         return await result.delete()
 
     except Exception as e:
-        print(e)
-        await txt.delete()
-        result = await event.reply("I am Unable Search,Please Search In @PostSearchBOT🙏")
-        await asyncio.sleep(Config.AUTO_DELETE_TIME)
-        await event.delete() 
-        return await result.delete()
+        print(f"Error: {e}")
 
+async def escape_url(string):
+    return urllib.parse.quote(string)
 
-async def escape_url(str):
-    escape_url = urllib.parse.quote(str)
-    return escape_url
+async def main():
+    await client.start()
+    await tbot.start()
+    print("\n-------------------- Bot Started Successfully --------------------\n")
+    await tbot.run_until_disconnected()
+    await client.run_until_disconnected()
 
-# Bot Client with Plugins Support
-Bot = Client(
-    "PrimeBotz",  # যেকোনো নাম দিতে পারো, এটা session_name এর বিকল্প
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN,
-    plugins=dict(root="plugins")  # প্লাগইন লোড করার জন্য
-)
+if __name__ == "__main__":
+    # Start Pyrogram Bot
+    Bot.start()
 
-print()
-print("-------------------- Initializing Telegram Bot --------------------")
-# Start Clients
-Bot.start()
-
-print("------------------------------------------------------------------")
-print()
-print(f"""
+    print(f"""
  _____________________________________________   
 |                                             |  
 |          Deployed Successfully              |  
@@ -191,17 +127,8 @@ print(f"""
 |_____________________________________________|
     """)
 
-# User.start()
-with tbot, client:
-    asyncio.run(asyncio.gather(
-        tbot.run_until_disconnected(),
-        client.run_until_disconnected()
-    ))
-# Loop Clients till Disconnects
-idle()
-# After Disconnects,
-# Stop Clients
-print()
-print("------------------------ Stopped Services ------------------------")
-Bot.stop()
-# User.stop()
+    asyncio.run(main())
+
+    print("\n------------------------ Stopped Services ------------------------")
+    Bot.stop()
+    
