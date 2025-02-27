@@ -154,13 +154,13 @@ async def escape_url(str):
     escape_url = urllib.parse.quote(str)
     return escape_url
 
-# Bot Client for Inline Search
+# Bot Client with Plugins Support
 Bot = Client(
-    session_name=Config.BOT_SESSION_NAME,
+    "PrimeBotz",  # যেকোনো নাম দিতে পারো, এটা session_name এর বিকল্প
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    plugins=dict(root="plugins")
+    plugins=dict(root="plugins")  # প্লাগইন লোড করার জন্য
 )
 
 print()
