@@ -1,19 +1,32 @@
+from flask import Flask
+import threading
 from os import link
 from telethon import Button
 from configs import Config
-from pyrogram import Client, idle
+from pyrogram import Client
 import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from plugins.tgraph import *
-from helpers import *
-from telethon import TelegramClient, events
-import urllib.parse
+from telethon import events
 from telethon.errors import UserNotParticipantError
 from telethon.tl.functions.channels import GetParticipantRequest
 import re
+
+# Flask Server Setup for Health Check
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is Running Successfully!"
+
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+# Flask Server Run in Background
+threading.Thread(target=run_web).start()
+
 tbot = TelegramClient('mdisktelethonbot', Config.API_ID, Config.API_HASH).start(bot_token=Config.BOT_TOKEN)
-client = TelegramClient(StringSession( Config.USER_SESSION_STRING), Config.API_ID, Config.API_HASH)
+client = TelegramClient(StringSession(Config.USER_SESSION_STRING), Config.API_ID, Config.API_HASH)
 
 
 async def get_user_join(id):
@@ -180,9 +193,10 @@ print(f"""
 
 # User.start()
 with tbot, client:
-    tbot.run_until_disconnected()
-    client.run_until_disconnected()
-
+    asyncio.run(asyncio.gather(
+        tbot.run_until_disconnected(),
+        client.run_until_disconnected()
+    ))
 # Loop Clients till Disconnects
 idle()
 # After Disconnects,
